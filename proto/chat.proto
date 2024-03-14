@@ -1,0 +1,18 @@
+syntax = "proto3";
+option go_package = "./messages";
+
+message Registration {
+    string username = 1;
+}
+
+message Chat {
+    string username = 1;
+    string message_body = 2;
+}
+
+message Wrapper {
+    oneof msg {
+        Registration reg_msg = 1;
+        Chat chat_msg = 2;
+    }
+}
