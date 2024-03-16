@@ -1,1 +1,1 @@
-PATH="$PATH:${GOPATH}/bin:${HOME}/go/bin" protoc --go_out=../chat/ ./*.proto
+PATH="$PATH:${GOPATH}/bin:${HOME}/go/bin" protoc --go_out=../fileTransfer/ ./*.proto
