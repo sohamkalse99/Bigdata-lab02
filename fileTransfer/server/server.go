@@ -1,42 +1,101 @@
 package main
 
 import (
+	"crypto/sha512"
 	"fileTransfer/files"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 )
 
-func handleClient(fileHandler *files.FileHandler, path string) {
-	defer fileHandler.Close()
+func getFilePath(path string, fileName string) string {
+	fp := filepath.Join(path, fileName)
+	return fp
+}
 
-	// for {
-	wrapper, _ := fileHandler.Receive()
+func calcCheckSum(path string) []byte {
+	file, err := os.Open(path)
+	if err != nil {
+		log.Fatalln(err.Error())
+	}
+	defer file.Close()
 
-	switch opn := wrapper.Operations.(type) {
-	case *files.Wrapper_FileDetails:
-		fmt.Println("File Details")
-		fmt.Println("Filename " + opn.FileDetails.FileName + "\n")
+	h := sha512.New()
 
-		if opn.FileDetails.Action == "put" {
-			// Send an ok response
-			okMsg := files.FileDetails{Status: "OK"}
-			okWrapper := &files.Wrapper{
-				Operations: &files.Wrapper_FileDetails{FileDetails: &okMsg},
-			}
-			fileHandler.Send(okWrapper)
-		}
-	case *files.Wrapper_File:
-
-	case nil:
-		log.Printf("Received an empty message. Terminating Client")
-		return
-	default:
-		log.Printf("Unexpected message type %T", opn)
+	if _, shaErr := io.Copy(h, file); err != nil {
+		log.Fatalln(shaErr)
 	}
 
-	// }
+	return h.Sum(nil)
+
+}
+func handleClient(fileHandler *files.FileHandler, path string) {
+	defer fileHandler.Close()
+	var act string
+	var fileSize int32
+	var fileName string
+	var checkSum []byte
+	for {
+		wrapper, _ := fileHandler.Receive()
+
+		switch opn := wrapper.Operations.(type) {
+		case *files.Wrapper_FileDetails:
+
+			act = opn.FileDetails.Action
+			fileSize = opn.FileDetails.Size
+			fileName = opn.FileDetails.FileName
+			checkSum = opn.FileDetails.Checksum
+			fmt.Println("File Details")
+			fmt.Println("Filename " + fileName + "\n")
+			fmt.Printf("Filesize %d\n", fileSize)
+
+			if act == "put" {
+				// Send an ok response
+				okMsg := files.FileDetails{Status: "OK"}
+				okWrapper := &files.Wrapper{
+					Operations: &files.Wrapper_FileDetails{FileDetails: &okMsg},
+				}
+				fileHandler.Send(okWrapper)
+			}
+		case *files.Wrapper_File:
+			if act == "put" {
+
+				// var fileArr []byte
+
+				fileArr := wrapper.GetFile().FileData
+				writeErr := os.WriteFile(fileName, fileArr, 0644)
+				fmt.Println("File arr" + string(fileArr) + "\n")
+
+				if writeErr != nil {
+					log.Fatalln(writeErr.Error())
+				} else {
+					fmt.Println("Wrote to a file")
+					// Calculate checksum of file and check with the original checksum
+					fp := getFilePath(path, fileName)
+					cs := calcCheckSum(fp)
+
+					// If both the checksums match send Transfer success
+					if string(cs) == string(checkSum) {
+						transferMsg := files.File{TransferStatus: "success"}
+						transferWrapper := &files.Wrapper{
+							Operations: &files.Wrapper_File{File: &transferMsg},
+						}
+						fmt.Println("Send success message")
+						fileHandler.Send(transferWrapper)
+					}
+				}
+			}
+		case nil:
+			log.Printf("Received an empty message. Terminating Client")
+			return
+		default:
+			log.Printf("Unexpected message type %T", opn)
+		}
+
+	}
 
 }
 
