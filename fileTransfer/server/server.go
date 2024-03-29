@@ -9,6 +9,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+
+	"golang.org/x/sys/unix"
 )
 
 func getFilePath(path string, fileName string) string {
@@ -32,8 +34,42 @@ func calcCheckSum(path string) []byte {
 	return h.Sum(nil)
 
 }
+
+func checkSpace(path string, fileSize int32, fileHandler *files.FileHandler) {
+	var stat unix.Statfs_t
+
+	unix.Statfs(path, &stat)
+
+	// fmt.Println("Available space: ", stat.Bavail*uint64(stat.Bsize))
+	freeSpace := stat.Bavail * uint64(stat.Bsize)
+	if freeSpace < uint64(fileSize) {
+		diskSpaceMsg := files.FileDetails{Status: "No Space available"}
+		diskSpaceWrapper := &files.Wrapper{
+			Operations: &files.Wrapper_FileDetails{
+				FileDetails: &diskSpaceMsg,
+			},
+		}
+
+		fileHandler.Send(diskSpaceWrapper)
+	}
+}
+
+func checkFileExist(fileName string, fileHandler *files.FileHandler) {
+	_, fileErr := os.Stat(fileName)
+	if fileErr == nil {
+		fileExistMsg := files.FileDetails{Status: "File Already Exist"}
+		fileExistWrapper := &files.Wrapper{
+			Operations: &files.Wrapper_FileDetails{
+				FileDetails: &fileExistMsg,
+			},
+		}
+
+		fileHandler.Send(fileExistWrapper)
+	}
+}
 func handleClient(fileHandler *files.FileHandler, path string) {
 	defer fileHandler.Close()
+	// TODO : Create a hashmap to store the details
 	var act string
 	var fileSize int32
 	var fileName string
@@ -53,6 +89,13 @@ func handleClient(fileHandler *files.FileHandler, path string) {
 			fmt.Printf("Filesize %d\n", fileSize)
 
 			if act == "put" {
+
+				// File exits
+				checkFileExist(fileName, fileHandler)
+
+				// Check disk space
+				checkSpace(path, fileSize, fileHandler)
+
 				// Send an ok response
 				okMsg := files.FileDetails{Status: "OK"}
 				okWrapper := &files.Wrapper{
@@ -89,7 +132,7 @@ func handleClient(fileHandler *files.FileHandler, path string) {
 				}
 			}
 		case nil:
-			log.Printf("Received an empty message. Terminating Client")
+			log.Printf("Received an empty message. Disconnecting the Client")
 			return
 		default:
 			log.Printf("Unexpected message type %T", opn)

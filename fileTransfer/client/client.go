@@ -94,7 +94,7 @@ func connectToServer(host string, action string, fileName string, size int32, ch
 			// Wait for servers response to the file details
 			wrapper, _ = fileHandler.Receive()
 
-			fmt.Printf("Message from server: %s", wrapper.GetFileDetails().GetStatus())
+			fmt.Printf("Message from server: %s\n", wrapper.GetFileDetails().GetStatus())
 			status := wrapper.GetFileDetails().GetStatus()
 
 			if status == "OK" {
