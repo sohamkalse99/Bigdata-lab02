@@ -35,7 +35,7 @@ func calcCheckSum(path string) []byte {
 
 }
 
-func checkSpace(path string, fileSize int32, fileHandler *files.FileHandler) {
+func checkSpace(path string, fileSize int32, fileHandler *files.FileHandler, flag *bool) {
 	var stat unix.Statfs_t
 
 	unix.Statfs(path, &stat)
@@ -49,12 +49,13 @@ func checkSpace(path string, fileSize int32, fileHandler *files.FileHandler) {
 				FileDetails: &diskSpaceMsg,
 			},
 		}
-
+		*flag = false
 		fileHandler.Send(diskSpaceWrapper)
 	}
+
 }
 
-func checkFileExist(fileName string, fileHandler *files.FileHandler) {
+func checkFileExist(fileName string, fileHandler *files.FileHandler, flag *bool) {
 	_, fileErr := os.Stat(fileName)
 	if fileErr == nil {
 		fileExistMsg := files.FileDetails{Status: "File Already Exist"}
@@ -63,17 +64,20 @@ func checkFileExist(fileName string, fileHandler *files.FileHandler) {
 				FileDetails: &fileExistMsg,
 			},
 		}
-
+		*flag = false
 		fileHandler.Send(fileExistWrapper)
 	}
 }
 func handleClient(fileHandler *files.FileHandler, path string) {
 	defer fileHandler.Close()
 	// TODO : Create a hashmap to store the details
+
 	var act string
 	var fileSize int32
 	var fileName string
 	var checkSum []byte
+	var flagVal bool
+	flag := &flagVal
 	for {
 		wrapper, _ := fileHandler.Receive()
 
@@ -89,13 +93,13 @@ func handleClient(fileHandler *files.FileHandler, path string) {
 			fmt.Printf("Filesize %d\n", fileSize)
 
 			if act == "put" {
-
+				*flag = true
 				// File exits
-				checkFileExist(fileName, fileHandler)
+				checkFileExist(fileName, fileHandler, flag)
 
 				// Check disk space
-				checkSpace(path, fileSize, fileHandler)
-
+				checkSpace(path, fileSize, fileHandler, flag)
+				fmt.Println("Flag: ", *flag)
 				// Send an ok response
 				okMsg := files.FileDetails{Status: "OK"}
 				okWrapper := &files.Wrapper{
@@ -104,7 +108,8 @@ func handleClient(fileHandler *files.FileHandler, path string) {
 				fileHandler.Send(okWrapper)
 			}
 		case *files.Wrapper_File:
-			if act == "put" {
+			// If action is put and status is ok (checking this using boolean flag)
+			if act == "put" && *flag {
 
 				// var fileArr []byte
 
