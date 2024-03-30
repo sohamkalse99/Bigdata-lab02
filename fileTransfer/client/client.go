@@ -69,7 +69,99 @@ func calcCheckSum(path string) []byte {
 	return h.Sum(nil)
 
 }
-func connectToServer(host string, action string, fileName string, size int32, checkSum []byte, fileArr []byte) {
+
+func getFilePath(path string, fileName string) string {
+	fp := filepath.Join(path, fileName)
+	return fp
+}
+
+func handlePutRequest(fileHandler *files.FileHandler, host string, action string, fileName string, size int32, checkSum []byte, fileArr []byte) {
+
+	if len(fileName) != 0 {
+		fmt.Println("Filename " + fileName)
+		fileMsg := files.FileDetails{FileName: fileName, Size: size, Checksum: checkSum, Action: action}
+
+		wrapper := &files.Wrapper{
+			Operations: &files.Wrapper_FileDetails{FileDetails: &fileMsg},
+		}
+		fileHandler.Send(wrapper)
+
+		// Wait for servers response to the file details
+		wrapper, _ = fileHandler.Receive()
+
+		fmt.Printf("Message from server: %s\n", wrapper.GetFileDetails().GetStatus())
+		status := wrapper.GetFileDetails().GetStatus()
+
+		if status == "OK" {
+
+			fileWrapper := &files.Wrapper{
+				Operations: &files.Wrapper_File{File: &files.File{
+					FileData: fileArr,
+				}},
+			}
+
+			fileHandler.Send(fileWrapper)
+			fmt.Println("Sent files to the server")
+
+			wrapper, _ = fileHandler.Receive()
+			transferStatus := wrapper.GetFile().TransferStatus
+
+			if transferStatus == "success" {
+				fmt.Println("Received Success message from server")
+			}
+		}
+	}
+}
+
+func handleGetRequest(fileHandler *files.FileHandler, action string, fileName string, path string) {
+
+	if len(fileName) != 0 {
+		fileDetails := files.FileDetails{FileName: fileName, Action: action}
+
+		// Create a wrapper message with filename and action to the server
+		fileDetailsWrapper := &files.Wrapper{
+			Operations: &files.Wrapper_FileDetails{
+				FileDetails: &fileDetails,
+			},
+		}
+
+		fileHandler.Send(fileDetailsWrapper)
+
+		// Either size, checksum or filedoes not exit
+		wrapper, _ := fileHandler.Receive()
+		serverChecksum := wrapper.GetFileDetails().Checksum
+		status := wrapper.GetFileDetails().Status
+		// size := wrapper.GetFileDetails().Size
+		fmt.Println("Status: ", status)
+		if status != "details" {
+			fmt.Println("Server does not contain the file")
+		} else {
+			// TODO : Create the file and begin storing its data
+
+			// Get the file array
+			wrapper, _ := fileHandler.Receive()
+			fileArr := wrapper.GetFile().FileData
+			writeErr := os.WriteFile(fileName, fileArr, 0644)
+			fmt.Println("File arr" + string(fileArr) + "\n")
+
+			if writeErr != nil {
+				log.Fatalln(writeErr.Error())
+			} else {
+				fmt.Println("Wrote to a file")
+				fp := getFilePath(path, fileName)
+				cs := calcCheckSum(fp)
+
+				if string(cs) == string(serverChecksum) {
+					fmt.Println("Checksum matched")
+					fmt.Println("success")
+				}
+			}
+
+		}
+	}
+
+}
+func connectToServer(host string, action string, filePath string, path string) {
 	conn, err := net.Dial("tcp", host)
 
 	if err != nil {
@@ -78,49 +170,23 @@ func connectToServer(host string, action string, fileName string, size int32, ch
 
 	defer conn.Close()
 
+	fileHandler := files.NewFileHandler(conn)
+
 	if strings.ToLower(action) == "put" {
-		fileHandler := files.NewFileHandler(conn)
 
-		// for {
-		if len(fileName) != 0 {
-			fmt.Println("Filename " + fileName)
-			fileMsg := files.FileDetails{FileName: fileName, Size: size, Checksum: checkSum, Action: action}
+		fileName := extractFileName(filePath)
+		size := calcFileSize(filePath)
+		fmt.Printf("Filesize %d\n", size)
+		fileArr := readFile(filePath)
+		checkSum := calcCheckSum(filePath)
 
-			wrapper := &files.Wrapper{
-				Operations: &files.Wrapper_FileDetails{FileDetails: &fileMsg},
-			}
-			fileHandler.Send(wrapper)
+		handlePutRequest(fileHandler, host, action, fileName, size, checkSum, fileArr)
 
-			// Wait for servers response to the file details
-			wrapper, _ = fileHandler.Receive()
+	} else if strings.ToLower(action) == "get" {
 
-			fmt.Printf("Message from server: %s\n", wrapper.GetFileDetails().GetStatus())
-			status := wrapper.GetFileDetails().GetStatus()
+		handleGetRequest(fileHandler, action, filePath, path)
 
-			if status == "OK" {
-
-				fileWrapper := &files.Wrapper{
-					Operations: &files.Wrapper_File{File: &files.File{
-						FileData: fileArr,
-					}},
-				}
-
-				fileHandler.Send(fileWrapper)
-				fmt.Println("Sent files to the server")
-
-				wrapper, _ = fileHandler.Receive()
-				transferStatus := wrapper.GetFile().TransferStatus
-
-				if transferStatus == "success" {
-					fmt.Println("Received Success message from server")
-				}
-			}
-		}
-
-		// }
-	} /*else if strings.ToLower(action) == "get" {
-
-	}*/
+	}
 
 }
 func main() {
@@ -138,16 +204,18 @@ func main() {
 	if dirErr != nil {
 		log.Fatalln(dirErr.Error())
 	}
-	if len(os.Args) == 4 {
-		path = os.Args[3]
+
+	// If get request it is file name else it is file path
+	filePath := os.Args[3]
+
+	if action == "get" {
+
+		if len(os.Args) == 5 {
+			path = os.Args[4]
+		}
 	}
 
-	fileName := extractFileName(path)
-	size := calcFileSize(path)
-	fmt.Printf("Filesize %d\n", size)
-	fileArr := readFile(path)
-	checkSum := calcCheckSum(path)
 	// Connect to the server
-	connectToServer(host, action, fileName, size, checkSum, fileArr)
+	connectToServer(host, action, filePath, path)
 
 }
